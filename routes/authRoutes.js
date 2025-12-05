@@ -19,7 +19,6 @@ router.post('/register', async (req, res) => {
   try {
     const userExists = await User.findOne({ email });
 
-    const foewi = "fowhef";
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
     }
@@ -83,6 +82,30 @@ router.put('/profile', async (req, res) => {
         bloodType: updatedUser.bloodType,
         isAvailable: updatedUser.isAvailable,
         token: generateToken(updatedUser._id),
+      });
+    } else {
+      res.status(404).json({ message: 'User not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// @desc    Toggle availability status
+// @route   PATCH /api/auth/availability/:userId
+// @access  Private
+router.patch('/availability/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+
+    if (user) {
+      user.isAvailable = !user.isAvailable;
+      const updatedUser = await user.save();
+
+      res.json({
+        _id: updatedUser._id,
+        isAvailable: updatedUser.isAvailable,
+        message: `Availability updated to ${updatedUser.isAvailable ? 'available' : 'not available'}`,
       });
     } else {
       res.status(404).json({ message: 'User not found' });
