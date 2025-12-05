@@ -1,0 +1,10 @@
+node_modules
+logs
+.env
+.git
+.gitignore
+generate_keys.js
+test_crypto_config.js
+npm-debug.log
+Dockerfile
+.dockerignore
