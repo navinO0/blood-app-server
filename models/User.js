@@ -48,6 +48,10 @@ const userSchema = new mongoose.Schema({
   pushSubscription: {
     type: Object,
     default: null
+  },
+  emailNotifications: {
+    type: Boolean,
+    default: true,
   }
 }, {
   timestamps: true,

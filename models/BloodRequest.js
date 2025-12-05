@@ -20,6 +20,18 @@ bloodType: {
     type: String,
     required: true,
   },
+  locationUrl: {
+    type: String,
+    required: false,
+  },
+  patientName: {
+    type: String,
+    required: false,
+  },
+  quantity: {
+    type: String,
+    required: false,
+  },
   status: {
     type: String,
     enum: ['pending', 'fulfilled'],

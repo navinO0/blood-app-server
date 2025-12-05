@@ -39,6 +39,7 @@ router.post('/register', async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        emailNotifications: user.emailNotifications,
         token: generateToken(user._id),
       });
     } else {

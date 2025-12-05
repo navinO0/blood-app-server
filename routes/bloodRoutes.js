@@ -58,7 +58,7 @@ const sendEmail = require('../utils/email');
  *               $ref: '#/components/schemas/Error'
  */
 router.post('/request', async (req, res) => {
-  const { seekerId, bloodType, location } = req.body;
+  const { seekerId, bloodType, location, locationUrl, patientName, quantity, sendEmailNotifications } = req.body;
 
   if (!seekerId || !bloodType || !location) {
     return res.status(400).json({ message: 'seekerId, bloodType and location are required' });
@@ -69,6 +69,9 @@ router.post('/request', async (req, res) => {
       seekerId,
       bloodType,
       location,
+      locationUrl,
+      patientName,
+      quantity,
       acceptedBy: []
     });
 
@@ -97,7 +100,7 @@ router.post('/request', async (req, res) => {
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
         const acceptLink = `${frontendUrl}/respond?requestId=${request._id}&donorId=${donor._id}`;
 
-        // Create an in-app notification for donor
+        // Always create an in-app notification for donor
         await Notification.create({
           recipientId: donor._id,
           message: `New blood request for ${bloodType} near ${location}. Tap to view or accept.`,
@@ -105,17 +108,20 @@ router.post('/request', async (req, res) => {
           relatedRequestId: request._id,
         });
 
-        // Send email using template system
-        await sendEmail({
-          to: donor.email,
-          template: 'blood_request',
-          templateVars: {
-            donorName: donor.name || 'Donor',
-            bloodType: bloodType,
-            location: location,
-            acceptLink: acceptLink,
-          }
-        });
+        // Only send email if both seeker wants to send AND donor wants to receive
+        if (sendEmailNotifications !== false && donor.emailNotifications) {
+          // Send email using template system
+          await sendEmail({
+            to: donor.email,
+            template: 'blood_request',
+            templateVars: {
+              donorName: donor.name || 'Donor',
+              bloodType: bloodType,
+              location: location,
+              acceptLink: acceptLink,
+            }
+          });
+        }
 
         // Optionally: send push notification / SMS here via queue/service
         // e.g., enqueueJob('send-push', { userId: donor._id, requestId: request._id, ... })
@@ -134,12 +140,116 @@ router.post('/request', async (req, res) => {
   }
 });
 
-// @desc    Accept blood request
+// @desc    Accept blood request (with optional new donor registration)
 // @route   POST /api/blood/accept
 // @access  Public
 router.post('/accept', async (req, res) => {
-  const { requestId, donorId, donorName } = req.body;
+  const { requestId, donorId, donorName, donorData } = req.body;
 
+  // If donorData is provided, this is a new donor registration
+  if (donorData) {
+    const { name, email, phone, bloodType, location, emailNotifications } = donorData;
+
+    if (!requestId || !name || !email || !bloodType || !location) {
+      return res.status(400).json({ 
+        message: 'requestId, name, email, bloodType, and location are required for new donor registration' 
+      });
+    }
+
+    try {
+      // Check if user already exists
+      let donor = await User.findOne({ email: email.toLowerCase() });
+
+      if (donor) {
+        // User exists, just accept the request with their existing ID
+        const request = await BloodRequest.findById(requestId);
+        if (!request) {
+          return res.status(404).json({ message: 'Request not found' });
+        }
+
+        if (!Array.isArray(request.acceptedBy)) request.acceptedBy = [];
+
+        if (!request.acceptedBy.includes(donor._id)) {
+          request.acceptedBy.push(donor._id);
+          await request.save();
+
+          // Create Notification for Seeker
+          await Notification.create({
+            recipientId: request.seekerId,
+            message: `${donor.name} has accepted your blood request for ${request.bloodType}.`,
+            type: 'request_accepted',
+            relatedRequestId: requestId,
+          });
+
+          const eventPayload = {
+            requestId,
+            donorId: donor._id,
+            donorName: donor.name,
+            seekerId: request.seekerId,
+            timestamp: new Date(),
+          };
+
+          await sendEvent('donation-offers', eventPayload);
+        }
+
+        return res.json({ request, donor: { _id: donor._id, name: donor.name, email: donor.email } });
+      }
+
+      // Create new donor account
+      const newDonor = await User.create({
+        name,
+        email: email.toLowerCase(),
+        password: Math.random().toString(36).slice(-8) + 'Aa1!', // Generate random password
+        role: 'donor',
+        bloodType,
+        location,
+        phone: phone || '',
+        isAvailable: true,
+        emailNotifications: emailNotifications !== undefined ? emailNotifications : true,
+      });
+
+      // Accept the request with new donor
+      const request = await BloodRequest.findById(requestId);
+      if (!request) {
+        return res.status(404).json({ message: 'Request not found' });
+      }
+
+      if (!Array.isArray(request.acceptedBy)) request.acceptedBy = [];
+
+      request.acceptedBy.push(newDonor._id);
+      await request.save();
+
+      // Create Notification for Seeker
+      await Notification.create({
+        recipientId: request.seekerId,
+        message: `${newDonor.name} has accepted your blood request for ${request.bloodType}.`,
+        type: 'request_accepted',
+        relatedRequestId: requestId,
+      });
+
+      const eventPayload = {
+        requestId,
+        donorId: newDonor._id,
+        donorName: newDonor.name,
+        seekerId: request.seekerId,
+        timestamp: new Date(),
+      };
+
+      await sendEvent('donation-offers', eventPayload);
+
+      return res.json({ 
+        request, 
+        donor: { _id: newDonor._id, name: newDonor.name, email: newDonor.email },
+        newDonorCreated: true 
+      });
+
+    } catch (error) {
+      console.error('POST /api/blood/accept (new donor) error:', error);
+      return res.status(500).json({ message: error.message || 'Server error' });
+    }
+  }
+
+  // Original flow for existing donors
   if (!requestId || !donorId) {
     return res.status(400).json({ message: 'requestId and donorId are required' });
   }
@@ -229,9 +339,30 @@ router.get('/donors', async (req, res) => {
   }
 });
 
-// @desc    Get donors who accepted a request
-// @route   GET /api/blood/requests/:id/donors
+// @desc    Get single blood request by ID (for shareable links)
+// @route   GET /api/blood/requests/:id
 // @access  Public
+router.get('/requests/:id', async (req, res) => {
+  try {
+    const request = await BloodRequest.findById(req.params.id)
+      .populate('seekerId', 'name phone location')
+      .populate('acceptedBy', 'name email phone location bloodType');
+    
+    if (!request) {
+      return res.status(404).json({ message: 'Blood request not found' });
+    }
+
+    res.json(request);
+  } catch (error) {
+    console.error('GET /api/blood/requests/:id error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// @desc    Get donors who accepted a specific request
+
+// @route   GET /api/blood/requests/:id/donors
+// @access  Private
 router.get('/requests/:id/donors', async (req, res) => {
   try {
     const request = await BloodRequest.findById(req.params.id).populate('acceptedBy', 'name email phone location bloodType');

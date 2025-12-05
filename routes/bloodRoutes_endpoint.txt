@@ -1,0 +1,18 @@
+// Add this route before the /requests/:id/donors route (around line 240)
+
+// @desc    Get single blood request by ID
+// @route   GET /api/blood/requests/:id
+// @access  Public
+router.get('/requests/:id', async (req, res) => {
+  try {
+    const request = await BloodRequest.findById(req.params.id);
+    
+    if (!request) {
+      return res.status(404).json({ message: 'Blood request not found' });
+    }
+
+    res.json(request);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
