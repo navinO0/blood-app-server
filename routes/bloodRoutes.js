@@ -1,0 +1,248 @@
+const express = require('express');
+const router = express.Router();
+const User = require('../models/User');
+const BloodRequest = require('../models/BloodRequest');
+const { sendEvent } = require('../services/kafka');
+const Notification = require('../models/Notification');
+const sendEmail = require('../utils/email');
+
+/**
+ * @swagger
+ * /api/blood/request:
+ *   post:
+ *     summary: Create a new blood request
+ *     description: Creates a blood request and notifies matching donors via email and in-app notifications
+ *     tags: [Blood Requests]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - seekerId
+ *               - bloodType
+ *               - location
+ *             properties:
+ *               seekerId:
+ *                 type: string
+ *                 description: ID of the user requesting blood
+ *                 example: "507f1f77bcf86cd799439011"
+ *               bloodType:
+ *                 type: string
+ *                 enum: [A+, A-, B+, B-, AB+, AB-, O+, O-]
+ *                 description: Required blood type
+ *                 example: "A+"
+ *               location:
+ *                 type: string
+ *                 description: Location where blood is needed
+ *                 example: "Mumbai"
+ *     responses:
+ *       201:
+ *         description: Blood request created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BloodRequest'
+ *       400:
+ *         description: Missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/request', async (req, res) => {
+  const { seekerId, bloodType, location } = req.body;
+
+  if (!seekerId || !bloodType || !location) {
+    return res.status(400).json({ message: 'seekerId, bloodType and location are required' });
+  }
+
+  try {
+    const request = await BloodRequest.create({
+      seekerId,
+      bloodType,
+      location,
+      acceptedBy: []
+    });
+
+    const eventPayload = {
+      requestId: request._id,
+      seekerId,
+      bloodType,
+      location,
+      timestamp: new Date(),
+    };
+
+    // Emit event for other services (analytics, notifications pipeline, etc.)
+    await sendEvent('blood-requests', eventPayload);
+
+    // Find matching donors (exclude seeker)
+    const donors = await User.find({
+      bloodType,
+      isAvailable: true,
+      _id: { $ne: seekerId }
+    });
+
+    // Notify donors (email + create Notification record)
+    // Use for...of so we can await and handle errors properly
+    for (const donor of donors) {
+      try {
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+        const acceptLink = `${frontendUrl}/respond?requestId=${request._id}&donorId=${donor._id}`;
+
+        // Create an in-app notification for donor
+        await Notification.create({
+          recipientId: donor._id,
+          message: `New blood request for ${bloodType} near ${location}. Tap to view or accept.`,
+          type: 'blood_request',
+          relatedRequestId: request._id,
+        });
+
+        // Send email using template system
+        await sendEmail({
+          to: donor.email,
+          template: 'blood_request',
+          templateVars: {
+            donorName: donor.name || 'Donor',
+            bloodType: bloodType,
+            location: location,
+            acceptLink: acceptLink,
+          }
+        });
+
+        // Optionally: send push notification / SMS here via queue/service
+        // e.g., enqueueJob('send-push', { userId: donor._id, requestId: request._id, ... })
+      } catch (innerErr) {
+        // Log and continue with other donors
+        console.error(`Failed to notify donor ${donor._id}:`, innerErr);
+        // Optionally: mark donor as unreachable or remove stale subscription if error indicates that
+      }
+    }
+
+    // Return created request to the caller
+    return res.status(201).json(request);
+  } catch (error) {
+    console.error('POST /api/blood/request error:', error);
+    return res.status(500).json({ message: error.message || 'Server error' });
+  }
+});
+
+// @desc    Accept blood request
+// @route   POST /api/blood/accept
+// @access  Public
+router.post('/accept', async (req, res) => {
+  const { requestId, donorId, donorName } = req.body;
+
+  if (!requestId || !donorId) {
+    return res.status(400).json({ message: 'requestId and donorId are required' });
+  }
+
+  try {
+    const request = await BloodRequest.findById(requestId);
+    if (!request) {
+      return res.status(404).json({ message: 'Request not found' });
+    }
+
+    // Ensure acceptedBy exists and is an array
+    if (!Array.isArray(request.acceptedBy)) request.acceptedBy = [];
+
+    if (!request.acceptedBy.includes(donorId)) {
+      request.acceptedBy.push(donorId);
+      await request.save();
+
+      // Create Notification for Seeker
+      await Notification.create({
+        recipientId: request.seekerId,
+        message: `${donorName || 'A donor'} has accepted your blood request for ${request.bloodType}.`,
+        type: 'request_accepted',
+        relatedRequestId: requestId,
+      });
+
+      // Update the donor's notification status to 'accepted'
+      await Notification.updateOne(
+        { 
+          recipientId: donorId, 
+          relatedRequestId: requestId, 
+          type: 'blood_request' 
+        },
+        { status: 'accepted', isRead: true }
+      );
+
+      // Mark other pending notifications for this request as 'expired' (optional)
+      await Notification.updateMany(
+        {
+          relatedRequestId: requestId,
+          type: 'blood_request',
+          status: 'pending',
+          recipientId: { $ne: donorId }
+        },
+        { status: 'expired' }
+      );
+
+      const eventPayload = {
+        requestId,
+        donorId,
+        donorName,
+        seekerId: request.seekerId,
+        timestamp: new Date(),
+      };
+
+      // Notify other services
+      await sendEvent('donation-offers', eventPayload);
+    }
+
+    return res.json(request);
+  } catch (error) {
+    console.error('POST /api/blood/accept error:', error);
+    return res.status(500).json({ message: error.message || 'Server error' });
+  }
+});
+
+// @desc    Get all donors (available users)
+// @route   GET /api/blood/donors
+// @access  Public
+router.get('/donors', async (req, res) => {
+  const { bloodType, location } = req.query;
+  const query = { isAvailable: true };
+
+  if (bloodType) {
+    query.bloodType = bloodType;
+  }
+
+  if (location) {
+    query.location = { $regex: location, $options: 'i' };
+  }
+
+  try {
+    const donors = await User.find(query).select('-password');
+    return res.json(donors);
+  } catch (error) {
+    console.error('GET /api/blood/donors error:', error);
+    return res.status(500).json({ message: error.message || 'Server error' });
+  }
+});
+
+// @desc    Get donors who accepted a request
+// @route   GET /api/blood/requests/:id/donors
+// @access  Public
+router.get('/requests/:id/donors', async (req, res) => {
+  try {
+    const request = await BloodRequest.findById(req.params.id).populate('acceptedBy', 'name email phone location bloodType');
+    if (!request) {
+      return res.status(404).json({ message: 'Request not found' });
+    }
+    return res.json(request.acceptedBy);
+  } catch (error) {
+    console.error('GET /api/blood/requests/:id/donors error:', error);
+    return res.status(500).json({ message: error.message || 'Server error' });
+  }
+});
+
+module.exports = router;
