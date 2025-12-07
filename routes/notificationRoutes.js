@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Notification = require('../models/Notification');
+const BloodRequest = require('../models/BloodRequest');
 
 // @desc    Get user notifications
 // @route   GET /api/notifications/:userId
@@ -8,8 +9,22 @@ const Notification = require('../models/Notification');
 router.get('/:userId', async (req, res) => {
   try {
     const notifications = await Notification.find({ recipientId: req.params.userId })
-      .sort({ createdAt: -1 });
-    res.json(notifications);
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    // Filter out notifications for expired requests
+    const validNotifications = [];
+    for (const notif of notifications) {
+      if (notif.relatedRequestId) {
+        const request = await BloodRequest.findById(notif.relatedRequestId);
+        if (request && request.expiresAt && new Date(request.expiresAt) < new Date()) {
+          continue; // Skip expired
+        }
+      }
+      validNotifications.push(notif);
+    }
+
+    res.json(validNotifications);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

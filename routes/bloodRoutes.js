@@ -4,7 +4,10 @@ const User = require('../models/User');
 const BloodRequest = require('../models/BloodRequest');
 const { sendEvent } = require('../services/kafka');
 const Notification = require('../models/Notification');
+
 const sendEmail = require('../utils/email');
+const { protect } = require('../middleware/authMiddleware');
+const { admin } = require('../middleware/adminMiddleware');
 
 /**
  * @swagger
@@ -57,7 +60,7 @@ const sendEmail = require('../utils/email');
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/request', async (req, res) => {
+router.post('/request', protect, admin, async (req, res) => {
   const { seekerId, bloodType, location, locationUrl, patientName, quantity, sendEmailNotifications } = req.body;
 
   if (!seekerId || !bloodType || !location) {
@@ -317,16 +320,26 @@ router.post('/accept', async (req, res) => {
 
 // @desc    Get all donors (available users)
 // @route   GET /api/blood/donors
-// @access  Public
-router.get('/donors', async (req, res) => {
+// @access  Private/Admin
+router.get('/donors', protect, admin, async (req, res) => {
   const { bloodType, location } = req.query;
   const query = { isAvailable: true };
+
+  // Cooling period check (90 days)
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  
+  query.$or = [
+    { lastDonatedDate: null },
+    { lastDonatedDate: { $lt: threeMonthsAgo } }
+  ];
 
   if (bloodType) {
     query.bloodType = bloodType;
   }
 
   if (location) {
+    // Case-insensitive search already handled by regex with 'i' flag
     query.location = { $regex: location, $options: 'i' };
   }
 
@@ -376,4 +389,57 @@ router.get('/requests/:id/donors', async (req, res) => {
   }
 });
 
+// @desc    Confirm donation (Admin only)
+// @route   POST /api/blood/confirm-donation
+// @access  Private/Admin
+router.post('/confirm-donation', protect, admin, async (req, res) => {
+  const { donorId, requestId } = req.body;
+
+  if (!donorId) {
+    return res.status(400).json({ message: 'donorId is required' });
+  }
+
+  try {
+    const donor = await User.findById(donorId);
+    if (!donor) {
+      return res.status(404).json({ message: 'Donor not found' });
+    }
+
+    // Update donor status
+    donor.lastDonatedDate = new Date();
+    donor.isAvailable = false; // Mark as unavailable immediately after donation
+    await donor.save();
+
+    // Optionally update request status to 'fulfilled' if needed
+    if (requestId) {
+      const request = await BloodRequest.findById(requestId);
+      if (request) {
+        request.status = 'fulfilled';
+        await request.save();
+      }
+    }
+
+    res.json({ message: 'Donation confirmed successfully', donor });
+  } catch (error) {
+    console.error('POST /api/blood/confirm-donation error:', error);
+    res.status(500).json({ message: error.message || 'Server error' });
+  }
+});
+
 module.exports = router;
+
+// @desc    Get all requests (Admin only)
+// @route   GET /api/blood/admin/requests
+// @access  Private/Admin
+router.get('/admin/requests', protect, admin, async (req, res) => {
+  try {
+    const requests = await BloodRequest.find({})
+      .populate('seekerId', 'name phone location')
+      .populate('acceptedBy', 'name email phone location bloodType lastDonatedDate')
+      .sort({ createdAt: -1 });
+    res.json(requests);
+  } catch (error) {
+    console.error('GET /api/blood/admin/requests error:', error);
+    res.status(500).json({ message: error.message || 'Server error' });
+  }
+});

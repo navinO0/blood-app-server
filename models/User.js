@@ -17,15 +17,15 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['donor', 'seeker'],
-    default: 'seeker',
+    enum: ['donor', 'seeker', 'admin'],
+    default: 'donor',
   },
   bloodType: {
     type: String,
-    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
-    required: function () {
-      return this.role === 'donor';
-    }
+    // enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
+    // required: function () {
+    //   return this.role === 'donor';
+    // }
   },
   location: {
     type: String,
@@ -52,6 +52,10 @@ const userSchema = new mongoose.Schema({
   emailNotifications: {
     type: Boolean,
     default: true,
+  },
+  lastDonatedDate: {
+    type: Date,
+    default: null,
   }
 }, {
   timestamps: true,

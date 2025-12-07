@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const { protect } = require('../middleware/authMiddleware');
+const { admin } = require('../middleware/adminMiddleware');
 
 // Generate JWT
 const generateToken = (id) => {
@@ -182,6 +184,44 @@ router.post('/google-signin', async (req, res) => {
       isAvailable: user.isAvailable,
       token: generateToken(user._id),
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// @desc    Create a new admin user
+// @route   POST /api/auth/create-admin
+// @access  Private/Admin
+router.post('/create-admin', protect, admin, async (req, res) => {
+  const { name, email, password, phone, location } = req.body;
+
+  try {
+    const userExists = await User.findOne({ email });
+
+    if (userExists) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      password,
+      role: 'admin',
+      phone,
+      location,
+      isAvailable: false // Admins are not donors by default
+    });
+
+    if (user) {
+      res.status(201).json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      });
+    } else {
+      res.status(400).json({ message: 'Invalid user data' });
+    }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
