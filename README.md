@@ -213,7 +213,8 @@ The server uses Winston for logging with the following features:
 
 **Server Emits:**
 - `blood-request-notification` - New blood request to donors
-- `donation-accepted-notification` - Acceptance notification to seeker
+- `donation-accepted-notification` - Acceptance notification to seeker/admin
+- `user_logged_in` - Real-time login alert for Admins
 
 **Client Listens:**
 - Connect to `http://localhost:5000` (or `FRONTEND_URL`)
