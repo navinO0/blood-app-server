@@ -54,6 +54,18 @@ const userSchema = new mongoose.Schema({
   lastDonatedDate: {
     type: Date,
     default: null,
+  },
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  otp: {
+    type: String,
+    select: false // Don't return in queries by default
+  },
+  otpExpires: {
+    type: Date,
+    select: false
   }
 }, {
   timestamps: true,

@@ -100,6 +100,19 @@ ${fromName}`,
 </body>
 </html>
 `
+    },
+    otp_verification: {
+      subject: 'Verify Your Email - BloodLink',
+      text: `Hello {{name}},\n\nYour verification code is: {{otp}}\n\nThis code will expire in 10 minutes.\n\nBest regards,\n${fromName}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h2>Verify Your Email</h2>
+          <p>Hello <strong>{{name}}</strong>,</p>
+          <p>Your verification code is:</p>
+          <h1 style="color: #dc2626; letter-spacing: 5px;">{{otp}}</h1>
+          <p>This code will expire in 10 minutes.</p>
+        </div>
+      `
     }
   };
 

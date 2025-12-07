@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const { protect } = require('../middleware/authMiddleware');
 const { admin } = require('../middleware/adminMiddleware');
 
+const sendEmail = require('../utils/email');
+
 // Generate JWT
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -12,7 +14,7 @@ const generateToken = (id) => {
   });
 };
 
-// @desc    Register a new user
+// @desc    Register a new user & Send OTP
 // @route   POST /api/auth/register
 // @access  Public
 router.post('/register', async (req, res) => {
@@ -22,8 +24,13 @@ router.post('/register', async (req, res) => {
     const userExists = await User.findOne({ email });
 
     if (userExists) {
+      // User requested to check existence before sending OTP. 
+      // We do not send OTP if user exists, even if unverified.
       return res.status(400).json({ message: 'User already exists' });
     }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = Date.now() + 10 * 60 * 1000; // 10 mins
 
     const user = await User.create({
       name,
@@ -33,16 +40,21 @@ router.post('/register', async (req, res) => {
       bloodType,
       location,
       phone,
+      isVerified: false,
+      otp,
+      otpExpires
     });
 
     if (user) {
+      await sendEmail({
+        to: email,
+        template: 'otp_verification',
+        templateVars: { name, otp }
+      });
+
       res.status(201).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        emailNotifications: user.emailNotifications,
-        token: generateToken(user._id),
+        message: 'Registration successful. Please verify your email with the OTP sent.',
+        email: user.email
       });
     } else {
       res.status(400).json({ message: 'Invalid user data' });
@@ -50,6 +62,58 @@ router.post('/register', async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
+});
+
+// @desc    Verify OTP
+// @route   POST /api/auth/verify-otp
+// @access  Public
+router.post('/verify-otp', async (req, res) => {
+    const { email, otp } = req.body;
+
+    try {
+        const user = await User.findOne({ email }).select('+otp +otpExpires'); // Explicitly select hidden fields
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        if (user.isVerified) {
+            return res.status(200).json({ 
+                message: 'User already verified',
+                token: generateToken(user._id),
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+             });
+        }
+
+        if (user.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP' });
+        }
+
+        if (user.otpExpires < Date.now()) {
+            return res.status(400).json({ message: 'OTP Expired' });
+        }
+
+        // OTP Valid
+        user.isVerified = true;
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        await user.save();
+
+        res.status(200).json({
+            message: 'Email verified successfully',
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            token: generateToken(user._id),
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
 });
 
 // @desc    Update user profile
@@ -128,6 +192,26 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
+      if (!user.isVerified) {
+          // Send new OTP if not verified
+          const otp = Math.floor(100000 + Math.random() * 900000).toString();
+          user.otp = otp;
+          user.otpExpires = Date.now() + 10 * 60 * 1000;
+          await user.save();
+
+          await sendEmail({
+             to: email,
+             template: 'otp_verification',
+             templateVars: { name: user.name, otp }
+          });
+
+          return res.status(403).json({ 
+              message: 'Email not verified. A new OTP has been sent to your email.',
+              email: user.email,
+              isUnverified: true 
+          });
+      }
+
       res.json({
         _id: user._id,
         name: user.name,
@@ -182,10 +266,12 @@ router.post('/google-signin', async (req, res) => {
         role: 'seeker', // Default role for Google sign-in
         password: Math.random().toString(36).slice(-8), // Random password (won't be used)
         isAvailable: true,
+        isVerified: true // Google accounts start verified
       });
     } else if (!user.googleId) {
       // Link Google account to existing user
       user.googleId = googleId;
+      user.isVerified = true; // Trust Google verification
       await user.save();
     }
 
