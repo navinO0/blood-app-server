@@ -52,6 +52,7 @@ const getEmailTemplate = (type, vars) => {
       text: process.env.EMAIL_BLOOD_REQUEST_TEXT || `Hello {{donorName}},
 
 A new blood request has been posted near {{location}} for blood type {{bloodType}}.
+Patient Name: {{patientName}}
 
 You can help save a life by accepting this request.
 
@@ -83,6 +84,7 @@ ${fromName}`,
       <p>Hello <strong>{{donorName}}</strong>,</p>
       <p>A new blood request has been posted that matches your blood type!</p>
       <p><strong>Blood Type Needed:</strong> {{bloodType}}</p>
+      <p><strong>Patient Name:</strong> {{patientName}}</p>
       <p><strong>Location:</strong> {{location}}</p>
       <p>Your donation can save a life. Please consider accepting this request if you are available.</p>
       <div style="text-align: center;">

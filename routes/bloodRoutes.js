@@ -106,7 +106,7 @@ router.post('/request', protect, admin, async (req, res) => {
         // Always create an in-app notification for donor
         await Notification.create({
           recipientId: donor._id,
-          message: `New blood request for ${bloodType} near ${location}. Tap to view or accept.`,
+          message: `New blood request for ${patientName ? patientName + ' (' + bloodType + ')' : bloodType} near ${location}. Tap to view or accept.`,
           type: 'blood_request',
           relatedRequestId: request._id,
         });
@@ -120,6 +120,7 @@ router.post('/request', protect, admin, async (req, res) => {
             templateVars: {
               donorName: donor.name || 'Donor',
               bloodType: bloodType,
+              patientName: patientName || 'N/A',
               location: location,
               acceptLink: acceptLink,
             }
@@ -434,29 +435,21 @@ router.post('/confirm-donation', protect, admin, async (req, res) => {
     console.error('POST /api/blood/confirm-donation error:', error);
     res.status(500).json({ message: error.message || 'Server error' });
   }
-});
-
-module.exports = router;
-
-// @desc    Get all requests (Admin only)
-// @route   GET /api/blood/admin/requests
-// @access  Private/Admin
-router.get('/admin/requests', protect, admin, async (req, res) => {
+// @desc    Get requests created by the current user (Seeker)
+// @route   GET /api/blood/my-requests
+// @access  Private
+router.get('/my-requests', protect, async (req, res) => {
   try {
-    // Filter out expired requests
-    const expiryHours = parseInt(process.env.REQUEST_EXPIRY_HOURS) || 24;
-    const expiryDate = new Date();
-    expiryDate.setHours(expiryDate.getHours() - expiryHours);
-
-    const requests = await BloodRequest.find({
-      createdAt: { $gte: expiryDate }
-    })
-      .populate('seekerId', 'name phone location')
+    const requests = await BloodRequest.find({ seekerId: req.user._id })
       .populate('acceptedBy', 'name email phone location bloodType lastDonatedDate')
       .sort({ createdAt: -1 });
     res.json(requests);
   } catch (error) {
-    console.error('GET /api/blood/admin/requests error:', error);
+    console.error('GET /api/blood/my-requests error:', error);
     res.status(500).json({ message: error.message || 'Server error' });
   }
 });
+
+});
+
+module.exports = router;
