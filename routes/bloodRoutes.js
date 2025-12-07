@@ -325,14 +325,24 @@ router.get('/donors', protect, admin, async (req, res) => {
   const { bloodType, location } = req.query;
   const query = { isAvailable: true };
 
-  // Cooling period check (90 days)
-  const threeMonthsAgo = new Date();
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  // Cooling period check (Configurable)
+  const coolingPeriodDays = parseInt(process.env.COOLING_PERIOD_DAYS) || 90;
+  const coolingDate = new Date();
+  coolingDate.setDate(coolingDate.getDate() - coolingPeriodDays);
   
-  query.$or = [
-    { lastDonatedDate: null },
-    { lastDonatedDate: { $lt: threeMonthsAgo } }
+  // STRICT Filtering: 
+  // User must be available AND (never donated OR last donated before cooling date)
+  query.$and = [
+    { isAvailable: true },
+    { 
+      $or: [
+        { lastDonatedDate: null },
+        { lastDonatedDate: { $lt: coolingDate } }
+      ]
+    }
   ];
+  // Remove the previous implicit $or which was causing issues with other fields if not carefully structured
+  delete query.$or;
 
   if (bloodType) {
     query.bloodType = bloodType;
@@ -433,7 +443,14 @@ module.exports = router;
 // @access  Private/Admin
 router.get('/admin/requests', protect, admin, async (req, res) => {
   try {
-    const requests = await BloodRequest.find({})
+    // Filter out expired requests
+    const expiryHours = parseInt(process.env.REQUEST_EXPIRY_HOURS) || 24;
+    const expiryDate = new Date();
+    expiryDate.setHours(expiryDate.getHours() - expiryHours);
+
+    const requests = await BloodRequest.find({
+      createdAt: { $gte: expiryDate }
+    })
       .populate('seekerId', 'name phone location')
       .populate('acceptedBy', 'name email phone location bloodType lastDonatedDate')
       .sort({ createdAt: -1 });
