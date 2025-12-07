@@ -20,9 +20,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST"]
-  }
+    origin: process.env.FRONTEND_URL_SOCKET || "http://localhost:3000",
+    methods: ["GET", "POST"],
+  },
 });
 
 global.io = io;
