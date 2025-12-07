@@ -147,6 +147,22 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// @desc    Get current user profile
+// @route   GET /api/auth/me
+// @access  Private
+router.get('/me', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('-password');
+    if (user) {
+      res.json(user);
+    } else {
+      res.status(404).json({ message: 'User not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // @desc    Google Sign-In
 // @route   POST /api/auth/google-signin
 // @access  Public
@@ -165,7 +181,7 @@ router.post('/google-signin', async (req, res) => {
         googleId,
         role: 'seeker', // Default role for Google sign-in
         password: Math.random().toString(36).slice(-8), // Random password (won't be used)
-        isAvailable: false,
+        isAvailable: true,
       });
     } else if (!user.googleId) {
       // Link Google account to existing user

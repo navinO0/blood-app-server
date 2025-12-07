@@ -37,9 +37,7 @@ const userSchema = new mongoose.Schema({
   },
   isAvailable: {
     type: Boolean,
-    default: function() {
-      return this.role === 'donor';
-    }
+    default: true
   },
   googleId: {
     type: String,
