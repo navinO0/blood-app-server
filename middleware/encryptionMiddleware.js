@@ -5,14 +5,10 @@ const enableEncryption = process.env.ENABLE_ENCRYPTION === 'true';
 // const enableEncryption = true; // FORCE TRUE FOR DEBUGGING
 
 const encryptionMiddleware = (req, res, next) => {
-  // Debug log
-  console.log('EncryptionMiddleware Init: Forced True');
-
   // Get fields to encrypt/decrypt from ENV
   let encryptedFields = [];
   try {
       encryptedFields = JSON.parse(process.env.ENCRYPTED_FIELDS || '[]');
-      console.log("[DEBUG] Loaded ENCRYPTED_FIELDS:", encryptedFields);
   } catch (e) {
       console.error("[ERROR] Failed to parse ENCRYPTED_FIELDS", e);
   }
