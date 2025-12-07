@@ -1,0 +1,73 @@
+name: Trigger Jenkins on push
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  trigger-jenkins:
+    runs-on: ubuntu-latest
+    environment: jenkins-trigger    # <- REQUIRED to access environment secrets
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets (no values shown)
+        env:
+          JENKINS_URL: ${{ secrets.JENKINS_URL }}
+          JENKINS_USER: ${{ secrets.JENKINS_USER }}
+          JENKINS_API_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
+          JENKINS_JOB: ${{ secrets.JENKINS_JOB }}        # <- you have this secret
+          JENKINS_SKIP_TLS_VERIFY: ${{ secrets.JENKINS_SKIP_TLS_VERIFY }}
+        run: |
+          set -euo pipefail
+          echo "JENKINS_URL: ${JENKINS_URL:+SET}"
+          echo "JENKINS_USER: ${JENKINS_USER:+SET}"
+          echo "JENKINS_API_TOKEN: ${JENKINS_API_TOKEN:+SET}"
+          echo "JENKINS_JOB: ${JENKINS_JOB:+SET}"
+          # fail if any missing
+          if [ -z "${JENKINS_URL:-}" ] || [ -z "${JENKINS_USER:-}" ] || [ -z "${JENKINS_API_TOKEN:-}" ] || [ -z "${JENKINS_JOB:-}" ]; then
+            echo "ERROR: one or more required secrets are not set (see above)."
+            exit 1
+          fi
+          echo "Secrets presence validated."
+      - name: Get Jenkins Crumb (CSRF) and trigger job
+        env:
+          JENKINS_URL: ${{ secrets.JENKINS_URL }}
+          JENKINS_USER: ${{ secrets.JENKINS_USER }}
+          JENKINS_TOKEN: ${{ secrets.JENKINS_API_TOKEN }}
+          JENKINS_JOB: ${{ secrets.JENKINS_JOB }}
+          SKIP_TLS_VERIFY: ${{ secrets.JENKINS_SKIP_TLS_VERIFY }}
+        run: |
+          set -euo pipefail
+          TLS_OPT=""
+          if [ "${SKIP_TLS_VERIFY:-}" = "true" ]; then
+            TLS_OPT="--insecure"
+          fi
+          echo "Fetching crumb..."
+          CRUMB_JSON=$(curl -sS $TLS_OPT -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
+            "${JENKINS_URL}/crumbIssuer/api/json" || true)
+          CRUMB_HEADER=""
+          if echo "$CRUMB_JSON" | grep -q '"crumb"'; then
+            CRUMB=$(echo "$CRUMB_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['crumb'])")
+            CRUMB_FIELD=$(echo "$CRUMB_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['crumbRequestField'])")
+            CRUMB_HEADER="-H ${CRUMB_FIELD}:$CRUMB"
+            echo "Crumb obtained."
+          else
+            echo "No crumb (proceeding without crumb header)."
+          fi
+          # Ensure JENKINS_JOB is proper path (example: job/MyJob or job/Folder/job/MyJob)
+          TRIGGER_URL="${JENKINS_URL}/${JENKINS_JOB}/build"
+          echo "Triggering: ${TRIGGER_URL}"
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $TLS_OPT -X POST \
+            -u "${JENKINS_USER}:${JENKINS_TOKEN}" \
+            $CRUMB_HEADER \
+            "${TRIGGER_URL}")
+          echo "Jenkins HTTP status: ${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" = "201" ] || [ "${HTTP_STATUS}" = "200" ] || [ "${HTTP_STATUS}" = "302" ]; then
+            echo "Trigger succeeded."
+          else
+            echo "Trigger failed (HTTP ${HTTP_STATUS})."
+            exit 1
+          fi
