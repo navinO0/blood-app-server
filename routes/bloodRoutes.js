@@ -109,7 +109,11 @@ router.post('/request', protect, admin, async (req, res) => {
           message: `New blood request for ${patientName ? patientName + ' (' + bloodType + ')' : bloodType} near ${location}. Tap to view or accept.`,
           type: 'blood_request',
           relatedRequestId: request._id,
+          location: location, // Pass location to notification object for UI if needed
         });
+
+        // Generate Map Link: Use provided URL or fallback to Google Maps search
+        const mapLink = locationUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`;
 
         // Only send email if both seeker wants to send AND donor wants to receive
         if (sendEmailNotifications !== false && donor.emailNotifications) {
@@ -122,6 +126,7 @@ router.post('/request', protect, admin, async (req, res) => {
               bloodType: bloodType,
               patientName: patientName || 'N/A',
               location: location,
+              locationLink: mapLink,
               acceptLink: acceptLink,
             }
           });

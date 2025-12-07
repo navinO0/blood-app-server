@@ -85,7 +85,7 @@ ${fromName}`,
       <p>A new blood request has been posted that matches your blood type!</p>
       <p><strong>Blood Type Needed:</strong> {{bloodType}}</p>
       <p><strong>Patient Name:</strong> {{patientName}}</p>
-      <p><strong>Location:</strong> {{location}}</p>
+      <p><strong>Location:</strong> <a href="{{locationLink}}">{{location}}</a> ( <a href="{{locationLink}}">View on Map</a> )</p>
       <p>Your donation can save a life. Please consider accepting this request if you are available.</p>
       <div style="text-align: center;">
         <a href="{{acceptLink}}" class="button">Accept Request</a>
