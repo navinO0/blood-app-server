@@ -212,6 +212,16 @@ router.post('/login', async (req, res) => {
           });
       }
 
+      // Emit login event for admins
+      if (global.io) {
+          global.io.emit('user_logged_in', {
+              userName: user.name,
+              userId: user._id,
+              role: user.role,
+              timestamp: new Date()
+          });
+      }
+
       res.json({
         _id: user._id,
         name: user.name,
@@ -236,9 +246,8 @@ router.post('/login', async (req, res) => {
 // @access  Private
 router.get('/me', protect, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('-password');
-    if (user) {
-      res.json(user);
+    if (req.user) {
+      res.json(req.user);
     } else {
       res.status(404).json({ message: 'User not found' });
     }

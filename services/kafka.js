@@ -47,7 +47,15 @@ const connectKafka = async () => {
 
 const sendEvent = async (topic, message) => {
   if (!isKafkaConnected) {
-    logger.warn(`Kafka not connected. Skipping event: ${topic}`);
+    logger.warn(`Kafka not connected. Falling back to direct socket emit for: ${topic}`);
+    // Fallback: Direct Socket Emission
+    if (global.io) {
+        if (topic === 'blood-requests') {
+            global.io.emit('blood-request-notification', message);
+        } else if (topic === 'donation-offers') {
+            global.io.emit('donation-accepted-notification', message);
+        }
+    }
     return;
   }
   try {
@@ -58,6 +66,14 @@ const sendEvent = async (topic, message) => {
     logger.info(`Sent Kafka message to ${topic}`);
   } catch (error) {
     logger.error(`Error sending Kafka message: ${error.message}`);
+    // Fallback on error too
+    if (global.io) {
+        if (topic === 'blood-requests') {
+            global.io.emit('blood-request-notification', message);
+        } else if (topic === 'donation-offers') {
+            global.io.emit('donation-accepted-notification', message);
+        }
+    }
   }
 };
 
