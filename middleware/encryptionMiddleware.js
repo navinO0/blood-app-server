@@ -1,42 +1,50 @@
-const { encryptData, decryptData, encryptObjectValues, decryptObjectValues } = require('../utils/crypto');
-const logger = require('../utils/logger');
+const { encryptObject, decryptObject } = require('../utils/encryption');
 
-// Toggle via env (default true for backward compatibility)
+// Toggle via env
 const enableEncryption = process.env.ENABLE_ENCRYPTION === 'true';
+// const enableEncryption = true; // FORCE TRUE FOR DEBUGGING
 
 const encryptionMiddleware = (req, res, next) => {
-  if (!enableEncryption) return next();
+  // Debug log
+  console.log('EncryptionMiddleware Init: Forced True');
 
-  // Decrypt Request Body (supports header or keyId in body)
-  // strict "schema same" mode: entire body values might be encrypted
-  if (req.body && Object.keys(req.body).length > 0) {
-    const keyId = req.get('X-Encryption-Key-Id') || req.body.keyId || 'default';
-    
-    // Decrypt all values in the body recursively
-    const decryptedBody = decryptObjectValues(req.body, keyId);
-    
-    // If we managed to decrypt something, update the body. 
-    // Since decryptObjectValues returns the original if decryption fails, this is safe.
-    req.body = decryptedBody;
+  // Get fields to encrypt/decrypt from ENV
+  let encryptedFields = [];
+  try {
+      encryptedFields = JSON.parse(process.env.ENCRYPTED_FIELDS || '[]');
+      console.log("[DEBUG] Loaded ENCRYPTED_FIELDS:", encryptedFields);
+  } catch (e) {
+      console.error("[ERROR] Failed to parse ENCRYPTED_FIELDS", e);
   }
 
-  // Intercept Response to Encrypt (adds keyId header)
+  // Check Key availability
+  if (!process.env.ENCRYPTION_KEY_HEX) {
+      console.error("[ERROR] ENCRYPTION_KEY_HEX is missing!");
+  }
+
+  // Decrypt Request Body
+  if (req.body && Object.keys(req.body).length > 0) {
+    try {
+        req.body = decryptObject(req.body, encryptedFields);
+    } catch (err) {
+        console.error("Decrypt Request Body Failed:", err);
+    }
+  }
+
+  // Intercept Response to Encrypt
   const originalJson = res.json;
   res.json = function (body) {
     if (!enableEncryption) return originalJson.call(this, body);
     
     // Only encrypt if it's an object/array and not empty
     if (body) {
-      const keyId = res.getHeader('X-Encrypt-Key') || 'default';
-      
-      // Encrypt all values recursively
-      const encryptedBody = encryptObjectValues(body, keyId);
-      
-      // Set the header so client knows which key to use
-      res.setHeader('X-Encryption-Key-Id', keyId);
-      
-      // Return the body with encrypted values (same schema)
-      return originalJson.call(this, encryptedBody);
+      try {
+          const encryptedBody = encryptObject(body, encryptedFields);
+          return originalJson.call(this, encryptedBody);
+      } catch (err) {
+          console.error("[CRITICAL] Response Encryption Failed - Returning Original:", err);
+          return originalJson.call(this, body); // Fallback to original
+      }
     }
     return originalJson.call(this, body);
   };

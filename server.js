@@ -1,5 +1,7 @@
-const express = require('express');
 const dotenv = require('dotenv');
+dotenv.config(); // Must be first
+
+const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const logger = require('./utils/logger');
@@ -7,8 +9,6 @@ const loggerMiddleware = require('./middleware/loggerMiddleware');
 const encryptionMiddleware = require('./middleware/encryptionMiddleware');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
-
-dotenv.config();
 
 connectDB();
 
