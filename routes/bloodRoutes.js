@@ -229,7 +229,7 @@ router.post('/accept', async (req, res) => {
       await request.save();
 
       // Create Notification for Seeker
-      await Notification.create({
+      const newDonorNotification = await Notification.create({
         recipientId: request.seekerId,
         message: `${newDonor.name} has accepted your blood request for ${request.bloodType}.`,
         type: 'request_accepted',
@@ -237,6 +237,7 @@ router.post('/accept', async (req, res) => {
       });
 
       const eventPayload = {
+        ...newDonorNotification.toObject(),
         requestId,
         donorId: newDonor._id,
         donorName: newDonor.name,
@@ -277,7 +278,7 @@ router.post('/accept', async (req, res) => {
       await request.save();
 
       // Create Notification for Seeker
-      await Notification.create({
+      const seekerNotification = await Notification.create({
         recipientId: request.seekerId,
         message: `${donorName || 'A donor'} has accepted your blood request for ${request.bloodType}.`,
         type: 'request_accepted',
@@ -306,6 +307,7 @@ router.post('/accept', async (req, res) => {
       );
 
       const eventPayload = {
+        ...seekerNotification.toObject(),
         requestId,
         donorId,
         donorName,
