@@ -6,13 +6,23 @@ const BloodRequest = require('../models/BloodRequest');
 // @desc    Get user notifications
 // @route   GET /api/notifications/:userId
 // @access  Public (should be private)
+// @route   GET /api/notifications/:userId
+// @access  Public (should be private)
 router.get('/:userId', async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const totalNotifications = await Notification.countDocuments({ recipientId: req.params.userId });
     const notifications = await Notification.find({ recipientId: req.params.userId })
       .sort({ createdAt: -1 })
-      .limit(20);
+      .skip(skip)
+      .limit(limit);
 
     // Filter out notifications for expired requests
+    // Note: This post-query filtering means a page might result in fewer than 'limit' items.
+    // Ideally, this should be done in an aggregation pipeline, but for now this maintains existing logic.
     const validNotifications = [];
     for (const notif of notifications) {
       if (notif.relatedRequestId) {
@@ -24,7 +34,15 @@ router.get('/:userId', async (req, res) => {
       validNotifications.push(notif);
     }
 
-    res.json(validNotifications);
+    res.json({
+      notifications: validNotifications,
+      pagination: {
+        total: totalNotifications,
+        page,
+        limit,
+        totalPages: Math.ceil(totalNotifications / limit)
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

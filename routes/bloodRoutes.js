@@ -89,11 +89,11 @@ router.post('/request', protect, admin, async (req, res) => {
     // Emit event for other services (analytics, notifications pipeline, etc.)
     await sendEvent('blood-requests', eventPayload);
 
-    // Find matching donors (exclude seeker)
     const donors = await User.find({
       bloodType,
       isAvailable: true,
-      _id: { $ne: seekerId }
+      _id: { $ne: seekerId },
+      location: { $regex: location, $options: "i" } 
     });
 
     // Notify donors (email + create Notification record)
