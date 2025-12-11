@@ -1,4 +1,4 @@
-const { Kafka } = require('kafkajs');
+const { Kafka, Partitioners } = require('kafkajs');
 const logger = require('../utils/logger');
 
 const kafka = new Kafka({
@@ -10,7 +10,9 @@ const kafka = new Kafka({
   }
 });
 
-const producer = kafka.producer();
+const producer = kafka.producer({
+  createPartitioner: Partitioners.LegacyPartitioner
+});
 const consumer = kafka.consumer({ groupId: 'blood-app-group' });
 
 let isKafkaConnected = false;
