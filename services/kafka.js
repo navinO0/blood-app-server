@@ -1,5 +1,6 @@
 const { Kafka, Partitioners } = require('kafkajs');
 const logger = require('../utils/logger');
+const sendEmail = require('../utils/email');
 
 const kafka = new Kafka({
   clientId: 'blood-app',
@@ -26,17 +27,35 @@ const connectKafka = async () => {
     
     await consumer.subscribe({ topic: 'blood-requests', fromBeginning: true });
     await consumer.subscribe({ topic: 'donation-offers', fromBeginning: true });
+    await consumer.subscribe({ topic: 'email-notifications', fromBeginning: true });
 
     await consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
         const payload = JSON.parse(message.value.toString());
         logger.info(`Received Kafka message on ${topic}: ${JSON.stringify(payload)}`);
         
+        // Handle Socket.IO Broadcast
         if (global.io) {
             if (topic === 'blood-requests') {
                 global.io.emit('blood-request-notification', payload);
             } else if (topic === 'donation-offers') {
                 global.io.emit('donation-accepted-notification', payload);
+            }
+        }
+
+        // Handle Email Notifications
+        if (topic === 'email-notifications') {
+            try {
+                const { to, template, templateVars } = payload;
+                if (!to || !template) {
+                    logger.error('Email notification missing required fields: to, template');
+                    return;
+                }
+                
+                await sendEmail({ to, template, templateVars });
+                logger.info(`Email sent successfully via Kafka to: ${to}`);
+            } catch (err) {
+                logger.error(`Error processing email in Kafka consumer: ${err.message}`);
             }
         }
       },

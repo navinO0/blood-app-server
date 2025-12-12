@@ -5,7 +5,6 @@ const BloodRequest = require('../models/BloodRequest');
 const { sendEvent } = require('../services/kafka');
 const Notification = require('../models/Notification');
 
-const sendEmail = require('../utils/email');
 const { protect } = require('../middleware/authMiddleware');
 const { admin } = require('../middleware/adminMiddleware');
 
@@ -117,8 +116,8 @@ router.post('/request', protect, admin, async (req, res) => {
 
         // Only send email if both seeker wants to send AND donor wants to receive
         if (sendEmailNotifications !== false && donor.emailNotifications) {
-          // Send email using template system
-          await sendEmail({
+          // Publish email event to Kafka for asynchronous processing
+          await sendEvent('email-notifications', {
             to: donor.email,
             template: 'blood_request',
             templateVars: {
