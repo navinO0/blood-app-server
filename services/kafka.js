@@ -1,5 +1,6 @@
 const { Kafka, Partitioners } = require('kafkajs');
 const logger = require('../utils/logger');
+const sendEmail = require('../utils/email');
 
 const kafka = new Kafka({
   clientId: 'blood-app',
@@ -24,19 +25,40 @@ const connectKafka = async () => {
     isKafkaConnected = true;
     logger.info('Kafka Connected');
     
+    // Subscribe to topics - email-notifications first to ensure it's registered
+    await consumer.subscribe({ topic: 'email-notifications', fromBeginning: false });
     await consumer.subscribe({ topic: 'blood-requests', fromBeginning: true });
     await consumer.subscribe({ topic: 'donation-offers', fromBeginning: true });
+    
+    logger.info('Kafka subscribed to topics: email-notifications, blood-requests, donation-offers');
 
     await consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
         const payload = JSON.parse(message.value.toString());
         logger.info(`Received Kafka message on ${topic}: ${JSON.stringify(payload)}`);
         
+        // Handle Socket.IO Broadcast
         if (global.io) {
             if (topic === 'blood-requests') {
                 global.io.emit('blood-request-notification', payload);
             } else if (topic === 'donation-offers') {
                 global.io.emit('donation-accepted-notification', payload);
+            }
+        }
+
+        // Handle Email Notifications
+        if (topic === 'email-notifications') {
+            try {
+                const { to, template, templateVars } = payload;
+                if (!to || !template) {
+                    logger.error('Email notification missing required fields: to, template');
+                    return;
+                }
+                
+                await sendEmail({ to, template, templateVars });
+                logger.info(`Email sent successfully via Kafka to: ${to}`);
+            } catch (err) {
+                logger.error(`Error processing email in Kafka consumer: ${err.message}`);
             }
         }
       },
@@ -49,13 +71,27 @@ const connectKafka = async () => {
 
 const sendEvent = async (topic, message) => {
   if (!isKafkaConnected) {
-    logger.warn(`Kafka not connected. Falling back to direct socket emit for: ${topic}`);
+    logger.warn(`Kafka not connected. Using fallback for: ${topic}`);
+    
     // Fallback: Direct Socket Emission
     if (global.io) {
         if (topic === 'blood-requests') {
             global.io.emit('blood-request-notification', message);
         } else if (topic === 'donation-offers') {
             global.io.emit('donation-accepted-notification', message);
+        }
+    }
+    
+    // Fallback: Direct Email Sending
+    if (topic === 'email-notifications') {
+        try {
+            const { to, template, templateVars } = message;
+            if (to && template) {
+                await sendEmail({ to, template, templateVars });
+                logger.info(`Email sent directly (Kafka fallback) to: ${to}`);
+            }
+        } catch (err) {
+            logger.error(`Error sending email via fallback: ${err.message}`);
         }
     }
     return;
@@ -68,12 +104,26 @@ const sendEvent = async (topic, message) => {
     logger.info(`Sent Kafka message to ${topic}`);
   } catch (error) {
     logger.error(`Error sending Kafka message: ${error.message}`);
+    
     // Fallback on error too
     if (global.io) {
         if (topic === 'blood-requests') {
             global.io.emit('blood-request-notification', message);
         } else if (topic === 'donation-offers') {
             global.io.emit('donation-accepted-notification', message);
+        }
+    }
+    
+    // Email fallback on Kafka error
+    if (topic === 'email-notifications') {
+        try {
+            const { to, template, templateVars } = message;
+            if (to && template) {
+                await sendEmail({ to, template, templateVars });
+                logger.info(`Email sent directly (Kafka error fallback) to: ${to}`);
+            }
+        } catch (err) {
+            logger.error(`Error sending email via fallback: ${err.message}`);
         }
     }
   }
